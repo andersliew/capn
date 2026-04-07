@@ -6,12 +6,12 @@ name: Gmail to Neon Sync
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/10 * * * *"
 
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 60
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       GMAIL_QUERY: ${{ secrets.GMAIL_QUERY }}
