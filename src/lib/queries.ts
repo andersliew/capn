@@ -18,7 +18,39 @@ function neonRows<T extends Record<string, unknown>>(result: unknown): T[] {
 
 type Sql = ReturnType<typeof getSql>;
 
-/** Shared WHERE for `patrol_reports_dashboard` aliased as `p` */
+/**
+ * `patrol_reports_clean` uses `to_timestamp(datetime, 'MM/DD/YYYY HH24:MI')`, which
+ * breaks on ISO values from the Gmail sync (`2026-04-07T13:05:00`) and raises
+ * `invalid value "T1" for "HH24"`. We read `patrol_reports_raw` and parse both shapes.
+ */
+function patrolReportsBase(sql: Sql) {
+  return sql`
+    (
+      SELECT
+        btrim(r.email_id::text) AS email_id,
+        r.report_type,
+        CASE
+          WHEN r.date IS NULL OR btrim(r.date::text) = '' THEN NULL
+          WHEN btrim(r.date::text) ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}$' THEN to_date(r.date, 'MM/DD/YYYY')
+          ELSE NULL
+        END AS patrol_date,
+        CASE
+          WHEN r.datetime IS NULL OR btrim(r.datetime::text) = '' THEN NULL
+          WHEN btrim(r.datetime::text) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' THEN r.datetime::timestamptz
+          WHEN btrim(r.datetime::text) ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}' THEN to_timestamp(r.datetime, 'MM/DD/YYYY HH24:MI')::timestamptz
+          ELSE NULL
+        END AS patrol_datetime,
+        TRIM(BOTH FROM regexp_replace(r.security_officer, '<[^>]*>'::text, ''::text, 'g'::text)) AS security_officer,
+        TRIM(BOTH FROM regexp_replace(r.location, '<[^>]*>'::text, ''::text, 'g'::text)) AS location,
+        TRIM(BOTH FROM regexp_replace(r.report_details, '<[^>]*>'::text, ''::text, 'g'::text)) AS report_details_clean,
+        r.has_images::boolean AS has_images,
+        r.num_attachments::integer AS num_attachments
+      FROM patrol_reports_raw r
+    )
+  `;
+}
+
+/** Shared WHERE for dashboard base subquery, aliased as `p` */
 function filterFragments(sql: Sql, f: PatrolDashboardFilters) {
   const q = f.search?.trim();
   return sql`
@@ -37,25 +69,25 @@ async function queryFilterOptions(sql: Sql): Promise<FilterOptions> {
   const [locRows, typeRows, offRows] = await Promise.all([
     neonRows<{ v: string }>(
       await sql`
-        SELECT DISTINCT trim(location) AS v
-        FROM patrol_reports_dashboard
-        WHERE location IS NOT NULL AND trim(location) <> ''
+        SELECT DISTINCT trim(p.location) AS v
+        FROM ${patrolReportsBase(sql)} p
+        WHERE p.location IS NOT NULL AND trim(p.location) <> ''
         ORDER BY 1
       `,
     ),
     neonRows<{ v: string }>(
       await sql`
-        SELECT DISTINCT trim(report_type) AS v
-        FROM patrol_reports_dashboard
-        WHERE report_type IS NOT NULL AND trim(report_type) <> ''
+        SELECT DISTINCT trim(p.report_type) AS v
+        FROM ${patrolReportsBase(sql)} p
+        WHERE p.report_type IS NOT NULL AND trim(p.report_type) <> ''
         ORDER BY 1
       `,
     ),
     neonRows<{ v: string }>(
       await sql`
-        SELECT DISTINCT trim(security_officer) AS v
-        FROM patrol_reports_dashboard
-        WHERE security_officer IS NOT NULL AND trim(security_officer) <> ''
+        SELECT DISTINCT trim(p.security_officer) AS v
+        FROM ${patrolReportsBase(sql)} p
+        WHERE p.security_officer IS NOT NULL AND trim(p.security_officer) <> ''
         ORDER BY 1
       `,
     ),
@@ -85,7 +117,7 @@ async function queryKpis(
         COUNT(DISTINCT NULLIF(trim(p.security_officer), ''))::int AS distinct_officers,
         COUNT(*) FILTER (WHERE p.has_images IS TRUE)::int AS reports_with_images,
         COALESCE(SUM(COALESCE(p.num_attachments, 0)), 0)::bigint AS total_attachments
-      FROM patrol_reports_dashboard p
+      FROM ${patrolReportsBase(sql)} p
       WHERE 1 = 1
       ${filterFragments(sql, f)}
     `,
@@ -109,7 +141,7 @@ async function queryReportsOverTime(
       SELECT
         p.patrol_date::text AS d,
         COUNT(*)::int AS cnt
-      FROM patrol_reports_dashboard p
+      FROM ${patrolReportsBase(sql)} p
       WHERE p.patrol_date IS NOT NULL
       ${filterFragments(sql, f)}
       GROUP BY p.patrol_date
@@ -126,10 +158,10 @@ async function queryReportsByHour(
   const rows = neonRows<{ hr: number; cnt: number }>(
     await sql`
       SELECT
-        LEAST(GREATEST(FLOOR(COALESCE(p.patrol_hour, 0))::int, 0), 23) AS hr,
+        EXTRACT(HOUR FROM p.patrol_datetime)::int AS hr,
         COUNT(*)::int AS cnt
-      FROM patrol_reports_dashboard p
-      WHERE 1 = 1
+      FROM ${patrolReportsBase(sql)} p
+      WHERE p.patrol_datetime IS NOT NULL
       ${filterFragments(sql, f)}
       GROUP BY 1
       ORDER BY 1
@@ -147,7 +179,7 @@ async function queryReportTypeBreakdown(
       SELECT
         COALESCE(NULLIF(trim(p.report_type), ''), 'Unknown') AS name,
         COUNT(*)::int AS cnt
-      FROM patrol_reports_dashboard p
+      FROM ${patrolReportsBase(sql)} p
       WHERE 1 = 1
       ${filterFragments(sql, f)}
       GROUP BY COALESCE(NULLIF(trim(p.report_type), ''), 'Unknown')
@@ -166,7 +198,7 @@ async function queryReportsByLocation(
       SELECT
         COALESCE(NULLIF(trim(p.location), ''), 'Unknown') AS name,
         COUNT(*)::int AS cnt
-      FROM patrol_reports_dashboard p
+      FROM ${patrolReportsBase(sql)} p
       WHERE 1 = 1
       ${filterFragments(sql, f)}
       GROUP BY COALESCE(NULLIF(trim(p.location), ''), 'Unknown')
@@ -186,12 +218,24 @@ async function queryReportsByDayOfWeek(
       SELECT s.name, s.cnt
       FROM (
         SELECT
-          COALESCE(NULLIF(trim(p.day_of_week), ''), 'Unknown') AS name,
+          COALESCE(
+            NULLIF(
+              trim(
+                CASE
+                  WHEN p.patrol_datetime IS NOT NULL THEN TRIM(BOTH FROM to_char(p.patrol_datetime, 'Day'))
+                  WHEN p.patrol_date IS NOT NULL THEN TRIM(BOTH FROM to_char(p.patrol_date::timestamp, 'Day'))
+                  ELSE ''
+                END
+              ),
+              ''
+            ),
+            'Unknown'
+          ) AS name,
           COUNT(*)::int AS cnt
-        FROM patrol_reports_dashboard p
+        FROM ${patrolReportsBase(sql)} p
         WHERE 1 = 1
         ${filterFragments(sql, f)}
-        GROUP BY COALESCE(NULLIF(trim(p.day_of_week), ''), 'Unknown')
+        GROUP BY 1
       ) s
       ORDER BY
         CASE s.name
@@ -232,10 +276,10 @@ async function queryRecentReports(
         p.has_images,
         p.num_attachments,
         p.report_details_clean
-      FROM patrol_reports_dashboard p
+      FROM ${patrolReportsBase(sql)} p
       WHERE 1 = 1
       ${filterFragments(sql, f)}
-      ORDER BY p.patrol_datetime DESC NULLS LAST
+      ORDER BY p.patrol_date DESC NULLS LAST, p.email_id DESC NULLS LAST
       LIMIT 75
     `,
   );
@@ -248,6 +292,11 @@ async function queryRecentReports(
     numAttachments: r.num_attachments,
     reportDetailsClean: r.report_details_clean,
   }));
+}
+
+export async function fetchFilterOptions(): Promise<FilterOptions> {
+  const sql = getSql();
+  return queryFilterOptions(sql);
 }
 
 export async function fetchDashboardData(

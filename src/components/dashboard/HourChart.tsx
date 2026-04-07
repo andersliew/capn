@@ -16,7 +16,7 @@ export function HourChart({ points }: Props) {
   return (
     <ChartShell
       title="Reports by hour"
-      subtitle="From patrol_hour (0–23)"
+      subtitle="Hour of patrol time (local timezone from Neon)"
     >
       <div className="flex h-full max-h-[200px] items-end gap-px px-1">
         {byHour.map((p) => (

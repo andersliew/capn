@@ -123,13 +123,17 @@ def parse_snippet(snippet):
 
 
 def get_attachment_info(payload):
+    """Count Gmail MIME parts that expose attachmentId (fetchable attachments).
+
+    Gmail often omits `filename` on inline images; requiring both filename and
+    attachmentId undercounted and produced 0 for typical patrol image emails.
+    """
     count = 0
 
     def walk_parts(part):
         nonlocal count
-        filename = part.get("filename")
         body = part.get("body", {})
-        if filename and body.get("attachmentId"):
+        if body.get("attachmentId"):
             count += 1
 
         for child in part.get("parts", []) or []:
@@ -161,16 +165,27 @@ def main():
     conn = psycopg2.connect(database_url)
     cursor = conn.cursor()
 
-    results = service.users().messages().list(
-        userId="me",
-        q=gmail_query,
-        maxResults=50
-    ).execute()
+    all_messages = []
+    next_page_token = None
 
-    messages = results.get("messages", [])
-    print(f"Found {len(messages)} matching messages")
+    while True:
+        results = service.users().messages().list(
+            userId="me",
+            q=gmail_query,
+            maxResults=500,
+            pageToken=next_page_token,
+        ).execute()
 
-    for msg in messages:
+        messages = results.get("messages", [])
+        all_messages.extend(messages)
+
+        next_page_token = results.get("nextPageToken")
+        if not next_page_token:
+            break
+
+    print(f"Found {len(all_messages)} matching messages")
+
+    for msg in all_messages:
         gmail_message_id = msg["id"]
 
         try:
@@ -204,13 +219,19 @@ def main():
                     gmail_message_id
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (gmail_message_id) DO NOTHING
+                ON CONFLICT (gmail_message_id) DO UPDATE SET
+                    has_images = EXCLUDED.has_images,
+                    num_attachments = EXCLUDED.num_attachments
             """, (
                 gmail_message_id,
                 report_type,
                 report_date,
                 report_time,
-                report_datetime.isoformat() if report_datetime else None,
+                (
+                    report_datetime.strftime("%m/%d/%Y %H:%M")
+                    if report_datetime
+                    else None
+                ),
                 officer,
                 location,
                 snippet,

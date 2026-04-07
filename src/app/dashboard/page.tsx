@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import { DateField } from "@/components/dashboard/DateField";
 import { HourChart } from "@/components/dashboard/HourChart";
@@ -51,27 +52,52 @@ function buildQuery(f: PatrolDashboardFilters): string {
   return s ? `?${s}` : "";
 }
 
-export default function DashboardPage() {
+function DashboardContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+
   const initial = useMemo(() => defaultRange(), []);
-  const [filters, setFilters] = useState<PatrolDashboardFilters>({
+  const [filters, setFilters] = useState<PatrolDashboardFilters>(() => ({
     startDate: initial.startDate,
     endDate: initial.endDate,
-    location: null,
+    location: searchParams.get("location")?.trim() || null,
     reportType: null,
     securityOfficer: null,
     hasImages: null,
     search: null,
-  });
+  }));
+
+  useEffect(() => {
+    const loc = searchParams.get("location")?.trim() || null;
+    setFilters((f) => (f.location === loc ? f : { ...f, location: loc }));
+  }, [searchParams]);
+
   const [searchInput, setSearchInput] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
   const [data, setData] = useState<DashboardPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(searchInput.trim()), 400);
-    return () => clearTimeout(t);
+  const applySearch = useCallback(() => {
+    setAppliedSearch(searchInput.trim());
   }, [searchInput]);
+
+  const setLocationFilter = useCallback(
+    (value: string) => {
+      const loc = value || null;
+      setFilters((f) => ({ ...f, location: loc }));
+      const p = new URLSearchParams(searchParams.toString());
+      if (loc) {
+        p.set("location", loc);
+      } else {
+        p.delete("location");
+      }
+      const qs = p.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname);
+    },
+    [pathname, router, searchParams],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -79,7 +105,7 @@ export default function DashboardPage() {
     try {
       const f: PatrolDashboardFilters = {
         ...filters,
-        search: debouncedSearch || null,
+        search: appliedSearch || null,
       };
       const res = await fetch(`/api/dashboard${buildQuery(f)}`, {
         cache: "no-store",
@@ -100,7 +126,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [filters, debouncedSearch]);
+  }, [filters, appliedSearch]);
 
   useEffect(() => {
     void load();
@@ -122,10 +148,7 @@ export default function DashboardPage() {
             >
               ← Home
             </Link>
-            <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-500/90">
-              CAPN
-            </p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-50 sm:text-3xl">
+            <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-50 sm:text-3xl">
               CAPN Security Reports Dashboard
             </h1>
           </div>
@@ -176,12 +199,7 @@ export default function DashboardPage() {
               </span>
               <select
                 value={filters.location ?? ""}
-                onChange={(e) =>
-                  setFilters((f) => ({
-                    ...f,
-                    location: e.target.value || null,
-                  }))
-                }
+                onChange={(e) => setLocationFilter(e.target.value)}
                 className="rounded-lg border border-white/[0.08] bg-[#141419] px-3 py-2 text-sm text-zinc-100"
               >
                 <option value="">All</option>
@@ -269,22 +287,31 @@ export default function DashboardPage() {
               <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
                 Search report details
               </span>
-              <input
-                type="search"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    setDebouncedSearch(searchInput.trim());
-                  }
-                }}
-                placeholder="Matches report_details_clean (server-side)"
-                className="w-full rounded-lg border border-white/[0.08] bg-[#141419] px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 sm:max-w-xl"
-              />
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch sm:gap-3">
+                <input
+                  type="search"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      applySearch();
+                    }
+                  }}
+                  placeholder="Matches report_details_clean (server-side)"
+                  className="w-full min-w-0 rounded-lg border border-white/[0.08] bg-[#141419] px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 sm:max-w-xl sm:flex-1"
+                />
+                <button
+                  type="button"
+                  onClick={applySearch}
+                  className="shrink-0 rounded-lg border border-white/[0.12] bg-white/[0.06] px-4 py-2 text-sm font-medium text-zinc-100 transition hover:bg-white/[0.1]"
+                >
+                  Search
+                </button>
+              </div>
             </label>
             <p className="mt-2 text-xs text-zinc-600">
-              Search debounces; press Enter to apply immediately. Other filters
-              reload automatically.
+              Report-details search runs when you click Search or press Enter.
+              Other filters apply as you change them.
             </p>
           </div>
         </div>
@@ -378,5 +405,36 @@ export default function DashboardPage() {
         ) : null}
       </main>
     </div>
+  );
+}
+
+function DashboardFallback() {
+  return (
+    <div className="min-h-full">
+      <header className="border-b border-white/[0.06] bg-[#0c0c0f]/95 backdrop-blur">
+        <div className="mx-auto max-w-[1600px] px-4 py-8 lg:px-8">
+          <div className="h-8 w-24 animate-pulse rounded bg-white/[0.06]" />
+          <div className="mt-4 h-9 max-w-md animate-pulse rounded bg-white/[0.06]" />
+        </div>
+      </header>
+      <main className="mx-auto max-w-[1600px] px-4 py-8 lg:px-8">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div
+              key={i}
+              className="h-24 animate-pulse rounded-xl bg-white/[0.04]"
+            />
+          ))}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<DashboardFallback />}>
+      <DashboardContent />
+    </Suspense>
   );
 }
