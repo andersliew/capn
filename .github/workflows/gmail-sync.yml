@@ -33,3 +33,5 @@ jobs:
 
       - name: Run Gmail sync
         run: python scripts/sync_gmail_to_neon.py
+
+# trigger
