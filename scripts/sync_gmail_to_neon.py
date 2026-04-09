@@ -22,6 +22,10 @@ from googleapiclient.discovery import build
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
+# Rolling retention: delete patrol rows whose parsed `datetime` is older than this.
+# Align `GMAIL_QUERY` (e.g. newer_than:30d) with the same window.
+_RETENTION_DAYS = 30
+
 # Repo root (parent of scripts/) — stable paths regardless of cwd
 _ROOT = Path(__file__).resolve().parent.parent
 
@@ -244,6 +248,25 @@ def main():
 
         except Exception as e:
             print(f"Error processing message {gmail_message_id}: {e}")
+
+    # Drop rows outside the rolling window (same datetime parsing as the dashboard SQL).
+    cursor.execute(
+        """
+        DELETE FROM patrol_reports_raw r
+        WHERE (
+            CASE
+                WHEN r.datetime IS NULL OR btrim(r.datetime::text) = '' THEN NULL
+                WHEN btrim(r.datetime::text) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
+                    THEN r.datetime::timestamptz
+                WHEN btrim(r.datetime::text) ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}'
+                    THEN to_timestamp(r.datetime, 'MM/DD/YYYY HH24:MI')::timestamptz
+                ELSE NULL
+            END
+        ) < NOW() - (%s * INTERVAL '1 day')
+        """,
+        (_RETENTION_DAYS,),
+    )
+    print(f"Deleted {cursor.rowcount} row(s) older than {_RETENTION_DAYS} days")
 
     conn.commit()
     cursor.close()

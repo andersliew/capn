@@ -19,9 +19,9 @@ function neonRows<T extends Record<string, unknown>>(result: unknown): T[] {
 type Sql = ReturnType<typeof getSql>;
 
 /**
- * `patrol_reports_clean` uses `to_timestamp(datetime, 'MM/DD/YYYY HH24:MI')`, which
- * breaks on ISO values from the Gmail sync (`2026-04-07T13:05:00`) and raises
- * `invalid value "T1" for "HH24"`. We read `patrol_reports_raw` and parse both shapes.
+ * Reads `patrol_reports_raw` and parses both ISO and legacy datetime shapes.
+ * `patrol_date` is the calendar day for filtering: prefer `date` when parseable,
+ * else the date part of `patrol_datetime` (many sync rows have `datetime` but not `date`).
  */
 function patrolReportsBase(sql: Sql) {
   return sql`
@@ -29,11 +29,19 @@ function patrolReportsBase(sql: Sql) {
       SELECT
         btrim(r.email_id::text) AS email_id,
         r.report_type,
-        CASE
-          WHEN r.date IS NULL OR btrim(r.date::text) = '' THEN NULL
-          WHEN btrim(r.date::text) ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}$' THEN to_date(r.date, 'MM/DD/YYYY')
-          ELSE NULL
-        END AS patrol_date,
+        COALESCE(
+          CASE
+            WHEN r.date IS NULL OR btrim(r.date::text) = '' THEN NULL
+            WHEN btrim(r.date::text) ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}$' THEN to_date(r.date, 'MM/DD/YYYY')
+            ELSE NULL
+          END,
+          CASE
+            WHEN r.datetime IS NULL OR btrim(r.datetime::text) = '' THEN NULL
+            WHEN btrim(r.datetime::text) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' THEN (r.datetime::timestamptz)::date
+            WHEN btrim(r.datetime::text) ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}' THEN (to_timestamp(r.datetime, 'MM/DD/YYYY HH24:MI')::timestamptz)::date
+            ELSE NULL
+          END
+        ) AS patrol_date,
         CASE
           WHEN r.datetime IS NULL OR btrim(r.datetime::text) = '' THEN NULL
           WHEN btrim(r.datetime::text) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' THEN r.datetime::timestamptz
@@ -50,28 +58,43 @@ function patrolReportsBase(sql: Sql) {
   `;
 }
 
+type FilterFragmentOpts = {
+  /** So the location dropdown still lists all locations in scope, not only the selected one */
+  omitLocation?: boolean;
+  omitReportType?: boolean;
+  omitSecurityOfficer?: boolean;
+};
+
 /** Shared WHERE for dashboard base subquery, aliased as `p` */
-function filterFragments(sql: Sql, f: PatrolDashboardFilters) {
+function filterFragments(
+  sql: Sql,
+  f: PatrolDashboardFilters,
+  opts?: FilterFragmentOpts,
+) {
   const q = f.search?.trim();
   return sql`
     ${f.startDate ? sql`AND p.patrol_date >= ${f.startDate}::date` : sql``}
     ${f.endDate ? sql`AND p.patrol_date <= ${f.endDate}::date` : sql``}
-    ${f.location ? sql`AND p.location = ${f.location}` : sql``}
-    ${f.reportType ? sql`AND p.report_type = ${f.reportType}` : sql``}
-    ${f.securityOfficer ? sql`AND p.security_officer = ${f.securityOfficer}` : sql``}
+    ${f.location && !opts?.omitLocation ? sql`AND p.location = ${f.location}` : sql``}
+    ${f.reportType && !opts?.omitReportType ? sql`AND p.report_type = ${f.reportType}` : sql``}
+    ${f.securityOfficer && !opts?.omitSecurityOfficer ? sql`AND p.security_officer = ${f.securityOfficer}` : sql``}
     ${f.hasImages === true ? sql`AND p.has_images IS TRUE` : sql``}
     ${f.hasImages === false ? sql`AND (p.has_images IS FALSE OR p.has_images IS NULL)` : sql``}
     ${q ? sql`AND p.report_details_clean ILIKE ${"%" + q + "%"}` : sql``}
   `;
 }
 
-async function queryFilterOptions(sql: Sql): Promise<FilterOptions> {
+async function queryFilterOptions(
+  sql: Sql,
+  f: PatrolDashboardFilters,
+): Promise<FilterOptions> {
   const [locRows, typeRows, offRows] = await Promise.all([
     neonRows<{ v: string }>(
       await sql`
         SELECT DISTINCT trim(p.location) AS v
         FROM ${patrolReportsBase(sql)} p
         WHERE p.location IS NOT NULL AND trim(p.location) <> ''
+        ${filterFragments(sql, f, { omitLocation: true })}
         ORDER BY 1
       `,
     ),
@@ -80,6 +103,7 @@ async function queryFilterOptions(sql: Sql): Promise<FilterOptions> {
         SELECT DISTINCT trim(p.report_type) AS v
         FROM ${patrolReportsBase(sql)} p
         WHERE p.report_type IS NOT NULL AND trim(p.report_type) <> ''
+        ${filterFragments(sql, f, { omitReportType: true })}
         ORDER BY 1
       `,
     ),
@@ -88,6 +112,7 @@ async function queryFilterOptions(sql: Sql): Promise<FilterOptions> {
         SELECT DISTINCT trim(p.security_officer) AS v
         FROM ${patrolReportsBase(sql)} p
         WHERE p.security_officer IS NOT NULL AND trim(p.security_officer) <> ''
+        ${filterFragments(sql, f, { omitSecurityOfficer: true })}
         ORDER BY 1
       `,
     ),
@@ -279,7 +304,7 @@ async function queryRecentReports(
       FROM ${patrolReportsBase(sql)} p
       WHERE 1 = 1
       ${filterFragments(sql, f)}
-      ORDER BY p.patrol_date DESC NULLS LAST, p.email_id DESC NULLS LAST
+      ORDER BY p.patrol_datetime DESC NULLS LAST, p.email_id DESC NULLS LAST
       LIMIT 75
     `,
   );
@@ -294,9 +319,19 @@ async function queryRecentReports(
   }));
 }
 
+const emptyFilters: PatrolDashboardFilters = {
+  startDate: null,
+  endDate: null,
+  location: null,
+  reportType: null,
+  securityOfficer: null,
+  hasImages: null,
+  search: null,
+};
+
 export async function fetchFilterOptions(): Promise<FilterOptions> {
   const sql = getSql();
-  return queryFilterOptions(sql);
+  return queryFilterOptions(sql, emptyFilters);
 }
 
 export async function fetchDashboardData(
@@ -314,7 +349,7 @@ export async function fetchDashboardData(
     reportsByDayOfWeek,
     recentReports,
   ] = await Promise.all([
-    queryFilterOptions(sql),
+    queryFilterOptions(sql, filters),
     queryKpis(sql, filters),
     queryReportsOverTime(sql, filters),
     queryReportsByHour(sql, filters),

@@ -15,7 +15,7 @@ import type { DashboardPayload, PatrolDashboardFilters } from "@/lib/types/dashb
 function defaultRange() {
   const end = new Date();
   const start = new Date();
-  start.setDate(start.getDate() - 90);
+  start.setDate(start.getDate() - 30);
   return {
     startDate: start.toISOString().slice(0, 10),
     endDate: end.toISOString().slice(0, 10),
@@ -130,11 +130,6 @@ function DashboardContent() {
 
   useEffect(() => {
     void load();
-  }, [load]);
-
-  useEffect(() => {
-    const id = setInterval(() => void load(), 60_000);
-    return () => clearInterval(id);
   }, [load]);
 
   return (

@@ -6,7 +6,8 @@ name: Gmail to Neon Sync
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/10 * * * *"
+    # Daily: sync Gmail (GMAIL_QUERY e.g. newer_than:30d) and prune DB rows older than 30 days
+    - cron: "0 8 * * *"
 
 jobs:
   sync:
@@ -33,5 +34,3 @@ jobs:
 
       - name: Run Gmail sync
         run: python scripts/sync_gmail_to_neon.py
-
-# trigger
