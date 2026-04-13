@@ -32,9 +32,9 @@ async function isAuthorizedToTrigger(request: Request): Promise<boolean> {
 /**
  * Starts incremental Gmail → Neon sync.
  *
- * - **Local dev**: spawns `python3 scripts/sync_gmail_to_neon.py` (incremental unless `GMAIL_SYNC_FULL=1`).
- * - **Vercel / production**: cannot run Python; set `GITHUB_SYNC_TOKEN` + `GITHUB_SYNC_REPO` to dispatch
- *   the `gmail-sync.yml` workflow (still incremental on GitHub — no `--full` in the workflow).
+ * - **Local dev**: runs `python3 scripts/sync_gmail_to_neon.py` (incremental unless `GMAIL_SYNC_FULL=1`)
+ *   with visible logs.
+ * - **Vercel / production**: dispatches GitHub Actions workflow.
  */
 export async function POST(request: Request) {
   const authorized = await isAuthorizedToTrigger(request);
@@ -42,19 +42,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // PRODUCTION → GitHub Actions
   if (isProductionLike()) {
     if (!isGmailSyncDispatchConfigured()) {
       return NextResponse.json(
         {
           skipped: true,
           reason:
-            "Production cannot run Python here. Set GITHUB_SYNC_TOKEN and GITHUB_SYNC_REPO to dispatch the Gmail sync workflow, or rely on the scheduled workflow only.",
+            "Set GITHUB_SYNC_TOKEN and GITHUB_SYNC_REPO to enable workflow dispatch.",
         },
         { status: 503 },
       );
     }
 
     const result = await dispatchGmailSyncWorkflow();
+
     if (!result.ok) {
       return NextResponse.json(
         {
@@ -69,6 +71,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ dispatched: true });
   }
 
+  // LOCALHOST → run Python directly (VISIBLE DEBUG MODE)
   const cwd = process.cwd();
   const script = join(cwd, "scripts", "sync_gmail_to_neon.py");
   const python = process.env.PYTHON_PATH?.trim() || "python3";
@@ -77,16 +80,22 @@ export async function POST(request: Request) {
     const child = spawn(python, [script], {
       cwd,
       env: { ...process.env },
-      detached: true,
-      stdio: "ignore",
+      stdio: "inherit", // <-- SHOW OUTPUT
     });
+
     child.on("error", (err: Error) => {
-      console.error("[gmail-sync]", err);
+      console.error("[gmail-sync spawn error]", err);
     });
-    child.unref();
+
+    child.on("exit", (code, signal) => {
+      console.log("[gmail-sync exit]", { code, signal });
+    });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ error: "spawn_failed", message }, { status: 500 });
+    return NextResponse.json(
+      { error: "spawn_failed", message },
+      { status: 500 },
+    );
   }
 
   return NextResponse.json({ started: true });
