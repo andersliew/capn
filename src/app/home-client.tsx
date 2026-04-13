@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { useTriggerGmailSyncOnMount } from "@/hooks/use-trigger-gmail-sync-on-mount";
 import type { FilterOptions } from "@/lib/types/dashboard";
 
 export function HomeClient() {
+  useTriggerGmailSyncOnMount();
   const [locations, setLocations] = useState<string[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [apartment, setApartment] = useState("");

@@ -38,6 +38,8 @@ function patrolReportsBase(sql: Sql) {
           CASE
             WHEN r.datetime IS NULL OR btrim(r.datetime::text) = '' THEN NULL
             WHEN btrim(r.datetime::text) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' THEN (r.datetime::timestamptz)::date
+            WHEN btrim(r.datetime::text) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]' THEN (r.datetime::timestamptz)::date
+            WHEN btrim(r.datetime::text) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN (btrim(r.datetime::text)::date)
             WHEN btrim(r.datetime::text) ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}' THEN (to_timestamp(r.datetime, 'MM/DD/YYYY HH24:MI')::timestamptz)::date
             ELSE NULL
           END
@@ -45,6 +47,8 @@ function patrolReportsBase(sql: Sql) {
         CASE
           WHEN r.datetime IS NULL OR btrim(r.datetime::text) = '' THEN NULL
           WHEN btrim(r.datetime::text) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' THEN r.datetime::timestamptz
+          WHEN btrim(r.datetime::text) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]' THEN r.datetime::timestamptz
+          WHEN btrim(r.datetime::text) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN (btrim(r.datetime::text)::date)::timestamptz
           WHEN btrim(r.datetime::text) ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}' THEN to_timestamp(r.datetime, 'MM/DD/YYYY HH24:MI')::timestamptz
           ELSE NULL
         END AS patrol_datetime,
@@ -65,6 +69,11 @@ type FilterFragmentOpts = {
   omitSecurityOfficer?: boolean;
 };
 
+/** Calendar day for range filters — COALESCE so rows with a timestamp but odd `date` column still match. */
+function patrolDayExpr(sql: Sql) {
+  return sql`COALESCE(p.patrol_date, (p.patrol_datetime)::date)`;
+}
+
 /** Shared WHERE for dashboard base subquery, aliased as `p` */
 function filterFragments(
   sql: Sql,
@@ -73,9 +82,11 @@ function filterFragments(
 ) {
   const q = f.search?.trim();
   return sql`
-    ${f.startDate ? sql`AND p.patrol_date >= ${f.startDate}::date` : sql``}
-    ${f.endDate ? sql`AND p.patrol_date <= ${f.endDate}::date` : sql``}
-    ${f.location && !opts?.omitLocation ? sql`AND p.location = ${f.location}` : sql``}
+    ${f.startDate ? sql`AND ${patrolDayExpr(sql)} >= ${f.startDate}::date` : sql``}
+    ${f.endDate ? sql`AND ${patrolDayExpr(sql)} <= ${f.endDate}::date` : sql``}
+    ${f.location && !opts?.omitLocation
+      ? sql`AND lower(trim(p.location)) = lower(trim(${f.location}))`
+      : sql``}
     ${f.reportType && !opts?.omitReportType ? sql`AND p.report_type = ${f.reportType}` : sql``}
     ${f.securityOfficer && !opts?.omitSecurityOfficer ? sql`AND p.security_officer = ${f.securityOfficer}` : sql``}
     ${f.hasImages === true ? sql`AND p.has_images IS TRUE` : sql``}
