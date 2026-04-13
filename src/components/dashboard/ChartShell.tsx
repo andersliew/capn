@@ -16,7 +16,9 @@ export function ChartShell({ title, subtitle, children }: Props) {
           <p className="mt-0.5 text-xs text-zinc-500">{subtitle}</p>
         ) : null}
       </div>
-      <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-x-auto overflow-y-auto pb-1">
+        {children}
+      </div>
     </div>
   );
 }

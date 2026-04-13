@@ -1,10 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { DateField } from "@/components/dashboard/DateField";
+import { DayOfWeekChart } from "@/components/dashboard/DayOfWeekChart";
 import { HourChart } from "@/components/dashboard/HourChart";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { NamedBarChart } from "@/components/dashboard/NamedBarChart";
@@ -12,6 +13,43 @@ import { RecentReportsTable } from "@/components/dashboard/RecentReportsTable";
 import { TimeSeriesChart } from "@/components/dashboard/TimeSeriesChart";
 import { useTriggerGmailSyncOnMount } from "@/hooks/use-trigger-gmail-sync-on-mount";
 import type { DashboardPayload, PatrolDashboardFilters } from "@/lib/types/dashboard";
+
+function LogOutIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden
+    >
+      <path
+        stroke="currentColor"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"
+      />
+    </svg>
+  );
+}
+
+const headerIconButtonClass =
+  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-[#141419] text-zinc-400 transition hover:border-white/[0.12] hover:text-zinc-200";
+
+/** Chevron + padding live in this module so SSR and the client bundle always match (avoids HMR/CSS drift on `<select>`). */
+const FILTER_SELECT_CHEVRON =
+  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")";
+
+const filterSelectStyle: CSSProperties = {
+  backgroundImage: FILTER_SELECT_CHEVRON,
+  backgroundRepeat: "no-repeat",
+  backgroundPosition: "right 0.85rem center",
+  backgroundSize: "1rem 1rem",
+};
+
+const filterSelectClassName =
+  "w-full appearance-none rounded-lg border border-white/[0.08] bg-[#141419] py-2 pl-3 pr-[2.35rem] text-sm text-zinc-100";
 
 /** Local calendar YYYY-MM-DD (avoid UTC shift from `toISOString()` on date boundaries). */
 function toLocalDateString(d: Date) {
@@ -183,31 +221,20 @@ export function DashboardClient({ initialLocation }: DashboardClientProps) {
   return (
     <div className="min-h-full">
       <header className="border-b border-white/[0.06] bg-[#0c0c0f]/95 backdrop-blur">
-        <div className="mx-auto flex max-w-[1600px] flex-col gap-4 px-4 py-5 lg:flex-row lg:items-end lg:justify-between lg:px-8">
-          <div>
-            <Link
-              href="/"
-              className="text-xs font-medium text-zinc-500 transition hover:text-zinc-300"
-            >
-              ← Home
-            </Link>
-            <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-50 sm:text-3xl">
+        <div className="mx-auto max-w-[1600px] px-4 py-5 lg:px-8">
+          <div className="flex items-center justify-between gap-4">
+            <h1 className="min-w-0 text-2xl font-semibold tracking-tight text-zinc-50 sm:text-3xl">
               CAPN Security Reports Dashboard
             </h1>
-          </div>
-          <div className="text-right text-xs text-zinc-500">
-            {data?.generatedAt ? (
-              <p>
-                Last updated{" "}
-                <span className="font-medium text-zinc-300">
-                  {new Date(data.generatedAt).toLocaleString(undefined, {
-                    dateStyle: "medium",
-                    timeStyle: "medium",
-                  })}
-                </span>
-                {loading ? " · refreshing…" : ""}
-              </p>
-            ) : null}
+            <form action="/api/logout" method="post" className="inline">
+              <button
+                type="submit"
+                className={headerIconButtonClass}
+                aria-label="Log out"
+              >
+                <LogOutIcon className="h-5 w-5" />
+              </button>
+            </form>
           </div>
         </div>
 
@@ -243,7 +270,8 @@ export function DashboardClient({ initialLocation }: DashboardClientProps) {
               <select
                 value={effectiveLocation ?? ""}
                 onChange={(e) => setLocationFilter(e.target.value)}
-                className="rounded-lg border border-white/[0.08] bg-[#141419] px-3 py-2 text-sm text-zinc-100"
+                style={filterSelectStyle}
+                className={filterSelectClassName}
               >
                 <option value="">All</option>
                 {locationSelectOptions.map((loc) => (
@@ -265,7 +293,8 @@ export function DashboardClient({ initialLocation }: DashboardClientProps) {
                     reportType: e.target.value || null,
                   }))
                 }
-                className="rounded-lg border border-white/[0.08] bg-[#141419] px-3 py-2 text-sm text-zinc-100"
+                style={filterSelectStyle}
+                className={filterSelectClassName}
               >
                 <option value="">All</option>
                 {data?.filterOptions.reportTypes.map((t) => (
@@ -287,7 +316,8 @@ export function DashboardClient({ initialLocation }: DashboardClientProps) {
                     securityOfficer: e.target.value || null,
                   }))
                 }
-                className="rounded-lg border border-white/[0.08] bg-[#141419] px-3 py-2 text-sm text-zinc-100"
+                style={filterSelectStyle}
+                className={filterSelectClassName}
               >
                 <option value="">All</option>
                 {data?.filterOptions.officers.map((o) => (
@@ -317,7 +347,8 @@ export function DashboardClient({ initialLocation }: DashboardClientProps) {
                       v === "yes" ? true : v === "no" ? false : null,
                   }));
                 }}
-                className="rounded-lg border border-white/[0.08] bg-[#141419] px-3 py-2 text-sm text-zinc-100"
+                style={filterSelectStyle}
+                className={filterSelectClassName}
               >
                 <option value="">All</option>
                 <option value="yes">Yes</option>
@@ -330,7 +361,7 @@ export function DashboardClient({ initialLocation }: DashboardClientProps) {
               <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
                 Search report details
               </span>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch sm:gap-3">
+                           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
                 <input
                   type="search"
                   value={searchInput}
@@ -350,6 +381,29 @@ export function DashboardClient({ initialLocation }: DashboardClientProps) {
                 >
                   Search
                 </button>
+                {data ? (
+                  <p className="shrink-0 text-xs text-zinc-500 sm:ml-auto sm:text-right">
+                    {data.lastGmailSyncAt ? (
+                      <>
+                        Last Gmail sync{" "}
+                        <span className="font-medium text-zinc-300">
+                          {new Date(data.lastGmailSyncAt).toLocaleString(
+                            undefined,
+                            {
+                              dateStyle: "medium",
+                              timeStyle: "medium",
+                            },
+                          )}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-zinc-600">
+                        Gmail sync time unavailable
+                      </span>
+                    )}
+                    {loading ? " · refreshing…" : ""}
+                  </p>
+                ) : null}
               </div>
             </label>
             <p className="mt-2 text-xs text-zinc-600">
@@ -419,12 +473,13 @@ export function DashboardClient({ initialLocation }: DashboardClientProps) {
               />
             </section>
 
-            <section className="grid gap-4 lg:grid-cols-2">
+            <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
               <TimeSeriesChart points={data.reportsOverTime} />
               <HourChart points={data.reportsByHour} />
+              <DayOfWeekChart rows={data.reportsByDayOfWeek} />
             </section>
 
-            <section className="grid gap-4 lg:grid-cols-3">
+            <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
               <NamedBarChart
                 title="Report type"
                 subtitle="Grouped by report_type"
@@ -436,9 +491,15 @@ export function DashboardClient({ initialLocation }: DashboardClientProps) {
                 rows={data.reportsByLocation}
               />
               <NamedBarChart
-                title="Day of week"
-                subtitle="Grouped by day_of_week"
-                rows={data.reportsByDayOfWeek}
+                title={
+                  effectiveLocation ? "Who covers this site?" : "By officer"
+                }
+                subtitle={
+                  effectiveLocation
+                    ? `Patrols at this location with your other filters`
+                    : `Patrol count by officer (other filters apply; officer filter ignored here)`
+                }
+                rows={data.reportsByOfficer}
               />
             </section>
 
@@ -458,9 +519,11 @@ export function DashboardFallback() {
   return (
     <div className="min-h-full">
       <header className="border-b border-white/[0.06] bg-[#0c0c0f]/95 backdrop-blur">
-        <div className="mx-auto max-w-[1600px] px-4 py-8 lg:px-8">
-          <div className="h-8 w-24 animate-pulse rounded bg-white/[0.06]" />
-          <div className="mt-4 h-9 max-w-md animate-pulse rounded bg-white/[0.06]" />
+        <div className="mx-auto max-w-[1600px] px-4 py-5 lg:px-8">
+          <div className="flex items-center justify-between gap-4">
+            <div className="h-9 max-w-md flex-1 animate-pulse rounded bg-white/[0.06]" />
+            <div className="h-9 w-9 shrink-0 animate-pulse rounded-lg bg-white/[0.06]" />
+          </div>
         </div>
       </header>
       <main className="mx-auto max-w-[1600px] px-4 py-8 lg:px-8">

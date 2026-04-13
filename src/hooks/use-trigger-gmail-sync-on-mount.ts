@@ -3,20 +3,22 @@
 import { useEffect, useRef } from "react";
 
 /**
- * Fire-and-forget incremental Gmail → Neon sync when the app loads.
- * The API runs the Python script in the background (local dev) or returns 503 in production
- * until `GMAIL_SYNC_TRIGGER_SECRET` is configured for authenticated calls.
+ * Fire-and-forget **incremental** Gmail → Neon sync when the dashboard mounts.
+ *
+ * - **Local dev**: API spawns `sync_gmail_to_neon.py` (uses `gmail_sync_state`, not a full re-list unless you set `GMAIL_SYNC_FULL`).
+ * - **Production (Vercel)**: API dispatches the GitHub Action when `GITHUB_SYNC_TOKEN` + `GITHUB_SYNC_REPO` are set;
+ *   your session cookie authorizes the request (no secret in the browser).
  */
-let triggeredThisSession = false;
-
 export function useTriggerGmailSyncOnMount() {
   const ran = useRef(false);
   useEffect(() => {
-    if (ran.current || triggeredThisSession) {
+    if (ran.current) {
       return;
     }
     ran.current = true;
-    triggeredThisSession = true;
-    void fetch("/api/gmail-sync", { method: "POST" }).catch(() => {});
+    void fetch("/api/gmail-sync", {
+      method: "POST",
+      credentials: "include",
+    }).catch(() => {});
   }, []);
 }

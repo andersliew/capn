@@ -464,6 +464,16 @@ def main():
     )
     print(f"Deleted {cursor.rowcount} row(s) older than {_RETENTION_DAYS} days")
 
+    # Marks last successful sync run (even when no new messages), so the dashboard
+    # can show when GitHub Actions / cron last finished — not only when the watermark moved.
+    cursor.execute(
+        """
+        UPDATE gmail_sync_state
+        SET updated_at = NOW()
+        WHERE id = 1
+        """
+    )
+
     conn.commit()
     cursor.close()
     conn.close()

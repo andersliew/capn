@@ -41,7 +41,10 @@ export type RecentReportRow = {
 };
 
 export type DashboardPayload = {
+  /** ISO timestamp: when this API response was built (browser refresh / filter change). */
   generatedAt: string;
+  /** ISO timestamp from `gmail_sync_state.updated_at`, or null if unavailable. */
+  lastGmailSyncAt: string | null;
   filters: PatrolDashboardFilters;
   filterOptions: FilterOptions;
   kpis: PatrolKpis;
@@ -49,6 +52,7 @@ export type DashboardPayload = {
   reportsByHour: HourPoint[];
   reportTypeBreakdown: NamedCount[];
   reportsByLocation: NamedCount[];
+  reportsByOfficer: NamedCount[];
   reportsByDayOfWeek: NamedCount[];
   recentReports: RecentReportRow[];
   empty: boolean;

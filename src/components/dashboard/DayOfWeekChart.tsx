@@ -1,24 +1,46 @@
-import type { HourPoint } from "@/lib/types/dashboard";
+import type { NamedCount } from "@/lib/types/dashboard";
 
 import { ChartShell } from "./ChartShell";
 import { TOP_ROW_CHART } from "./chart-layout";
 
+const WEEK_ORDER = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+] as const;
+
+const SHORT_LABEL = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] as const;
+
 type Props = {
-  points: HourPoint[];
+  rows: NamedCount[];
 };
 
-export function HourChart({ points }: Props) {
-  const byHour = Array.from({ length: 24 }, (_, h) => {
-    const found = points.find((p) => Number(p.hour) === h);
-    return { hour: h, count: found?.count ?? 0 };
-  });
-  const max = Math.max(1, ...byHour.map((p) => p.count));
+/**
+ * Compact column chart for patrol volume by weekday (same data as SQL `to_char(..., 'Day')`).
+ */
+export function DayOfWeekChart({ rows }: Props) {
+  const map: Record<string, number> = {};
+  for (const r of rows) {
+    map[r.name.trim()] = r.count;
+  }
+
+  const byDay = WEEK_ORDER.map((day, i) => ({
+    key: day,
+    label: SHORT_LABEL[i],
+    count: map[day] ?? 0,
+  }));
+
+  const max = Math.max(1, ...byDay.map((d) => d.count));
   const mid = Math.round(max / 2);
 
   return (
     <ChartShell
-      title="Reports by hour"
-      subtitle="Hour of patrol time (local timezone from Neon)"
+      title="Reports by weekday"
+      subtitle="Patrol counts by calendar day of week (in scope)"
     >
       <div className="flex min-h-0 flex-1 flex-col">
         <div className={`flex min-h-0 flex-1 gap-1.5`}>
@@ -44,20 +66,20 @@ export function HourChart({ points }: Props) {
             ))}
           </div>
 
-          <div className="flex min-h-0 min-w-0 flex-1 items-end gap-px px-0.5">
-            {byHour.map((p) => {
-              const pct = max > 0 ? (p.count / max) * 100 : 0;
+          <div className="flex min-h-0 min-w-0 flex-1 items-end gap-0.5 px-0.5">
+            {byDay.map((d) => {
+              const pct = max > 0 ? (d.count / max) * 100 : 0;
               return (
                 <div
-                  key={p.hour}
-                  title={`${p.hour}:00 — ${p.count}`}
+                  key={d.key}
+                  title={`${d.key}: ${d.count}`}
                   className="flex h-full min-w-0 flex-1 flex-col justify-end"
                 >
                   <div
-                    className="mx-auto w-full max-w-[12px] rounded-t bg-sky-500/90"
+                    className="mx-auto w-full max-w-[14px] rounded-t bg-sky-500/90"
                     style={{
-                      height: p.count > 0 ? `${Math.max(pct, 2)}%` : "0%",
-                      minHeight: p.count > 0 ? 2 : 0,
+                      height: d.count > 0 ? `${Math.max(pct, 2)}%` : "0%",
+                      minHeight: d.count > 0 ? 2 : 0,
                     }}
                   />
                 </div>
@@ -69,15 +91,15 @@ export function HourChart({ points }: Props) {
         <div className={`flex shrink-0 items-stretch ${TOP_ROW_CHART.gapClass}`}>
           <div className={`${TOP_ROW_CHART.yAxisClass} shrink-0`} aria-hidden />
           <div
-            className={`flex min-w-0 flex-1 items-stretch gap-px px-0.5 pb-1 pt-0 ${TOP_ROW_CHART.xAxisClass}`}
+            className={`flex min-w-0 flex-1 items-stretch gap-0.5 px-0.5 pb-1 pt-0 ${TOP_ROW_CHART.xAxisClass}`}
           >
-            {byHour.map((p) => (
+            {byDay.map((d) => (
               <div
-                key={p.hour}
+                key={d.key}
                 className="flex min-w-0 flex-1 flex-col justify-end"
               >
-                <span className="select-none text-center text-[10px] leading-none tabular-nums text-zinc-400">
-                  {p.hour % 4 === 0 ? p.hour : ""}
+                <span className="select-none text-center text-[10px] font-medium leading-none text-zinc-400">
+                  {d.label}
                 </span>
               </div>
             ))}

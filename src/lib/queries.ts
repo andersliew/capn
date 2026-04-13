@@ -19,6 +19,21 @@ function neonRows<T extends Record<string, unknown>>(result: unknown): T[] {
 type Sql = ReturnType<typeof getSql>;
 
 /**
+ * Legacy sync rows often stored the whole email tail in `location` (through "Time Submitted…").
+ * Strip that suffix for display, filters, and DISTINCT so the Location control lists real sites.
+ * Matches `scripts/sync_gmail_to_neon.py` `_CAPN_NEXT_FIELD` (keep in sync when labels change).
+ */
+function patrolLocationExpr(sql: Sql) {
+  /* POSIX `regexp_replace` (no JS `\s` — in JS '\s+' is invalid and becomes `s+`). */
+  return sql`TRIM(BOTH FROM regexp_replace(
+    TRIM(BOTH FROM regexp_replace(COALESCE(r.location::text, ''), '<[^>]*>'::text, ''::text, 'g'::text)),
+    '[[:space:]]+(Time[[:space:]]+Submitted|Report[[:space:]]+details|Type|Security[[:space:]]+Officer)[[:space:]]*:.*'::text,
+    ''::text,
+    'i'::text
+  ))`;
+}
+
+/**
  * Reads `patrol_reports_raw` and parses both ISO and legacy datetime shapes.
  * `patrol_date` is the calendar day for filtering: prefer `date` when parseable,
  * else the date part of `patrol_datetime` (many sync rows have `datetime` but not `date`).
@@ -53,7 +68,10 @@ function patrolReportsBase(sql: Sql) {
           ELSE NULL
         END AS patrol_datetime,
         TRIM(BOTH FROM regexp_replace(r.security_officer, '<[^>]*>'::text, ''::text, 'g'::text)) AS security_officer,
-        TRIM(BOTH FROM regexp_replace(r.location, '<[^>]*>'::text, ''::text, 'g'::text)) AS location,
+        CASE
+          WHEN r.location IS NULL OR btrim(r.location::text) = '' THEN NULL
+          ELSE ${patrolLocationExpr(sql)}
+        END AS location,
         TRIM(BOTH FROM regexp_replace(r.report_details, '<[^>]*>'::text, ''::text, 'g'::text)) AS report_details_clean,
         r.has_images::boolean AS has_images,
         r.num_attachments::integer AS num_attachments
@@ -93,6 +111,28 @@ function filterFragments(
     ${f.hasImages === false ? sql`AND (p.has_images IS FALSE OR p.has_images IS NULL)` : sql``}
     ${q ? sql`AND p.report_details_clean ILIKE ${"%" + q + "%"}` : sql``}
   `;
+}
+
+async function queryLastGmailSyncAt(sql: Sql): Promise<string | null> {
+  try {
+    const result = await sql`
+      SELECT updated_at AS updated_at
+      FROM gmail_sync_state
+      WHERE id = 1 LIMIT 1
+    `;
+    const rows = neonRows<{ updated_at: Date | string | null }>(result);
+    const v = rows[0]?.updated_at;
+    if (v == null) {
+      return null;
+    }
+    const d = v instanceof Date ? v : new Date(String(v));
+    if (Number.isNaN(d.getTime())) {
+      return null;
+    }
+    return d.toISOString();
+  } catch {
+    return null;
+  }
 }
 
 async function queryFilterOptions(
@@ -203,7 +243,10 @@ async function queryReportsByHour(
       ORDER BY 1
     `,
   );
-  return rows.map((r) => ({ hour: r.hr, count: r.cnt }));
+  return rows.map((r) => ({
+    hour: Number(r.hr),
+    count: Number(r.cnt),
+  }));
 }
 
 async function queryReportTypeBreakdown(
@@ -240,6 +283,26 @@ async function queryReportsByLocation(
       GROUP BY COALESCE(NULLIF(trim(p.location), ''), 'Unknown')
       ORDER BY cnt DESC
       LIMIT 24
+    `,
+  );
+  return rows.map((r) => ({ name: r.name, count: r.cnt }));
+}
+
+/** Officer roster for current filters; omits officer filter so a site view still lists everyone there. */
+async function queryReportsByOfficer(
+  sql: Sql,
+  f: PatrolDashboardFilters,
+): Promise<NamedCount[]> {
+  const rows = neonRows<{ name: string; cnt: number }>(
+    await sql`
+      SELECT
+        COALESCE(NULLIF(trim(p.security_officer), ''), 'Unknown') AS name,
+        COUNT(*)::int AS cnt
+      FROM ${patrolReportsBase(sql)} p
+      WHERE 1 = 1
+      ${filterFragments(sql, f, { omitSecurityOfficer: true })}
+      GROUP BY COALESCE(NULLIF(trim(p.security_officer), ''), 'Unknown')
+      ORDER BY cnt DESC LIMIT 32
     `,
   );
   return rows.map((r) => ({ name: r.name, count: r.cnt }));
@@ -357,8 +420,10 @@ export async function fetchDashboardData(
     reportsByHour,
     reportTypeBreakdown,
     reportsByLocation,
+    reportsByOfficer,
     reportsByDayOfWeek,
     recentReports,
+    lastGmailSyncAt,
   ] = await Promise.all([
     queryFilterOptions(sql, filters),
     queryKpis(sql, filters),
@@ -366,14 +431,17 @@ export async function fetchDashboardData(
     queryReportsByHour(sql, filters),
     queryReportTypeBreakdown(sql, filters),
     queryReportsByLocation(sql, filters),
+    queryReportsByOfficer(sql, filters),
     queryReportsByDayOfWeek(sql, filters),
     queryRecentReports(sql, filters),
+    queryLastGmailSyncAt(sql),
   ]);
 
   const empty = kpis.totalReports === 0;
 
   return {
     generatedAt: new Date().toISOString(),
+    lastGmailSyncAt,
     filters,
     filterOptions,
     kpis,
@@ -381,6 +449,7 @@ export async function fetchDashboardData(
     reportsByHour,
     reportTypeBreakdown,
     reportsByLocation,
+    reportsByOfficer,
     reportsByDayOfWeek,
     recentReports,
     empty,
