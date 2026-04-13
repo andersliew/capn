@@ -20,9 +20,10 @@ export function LoginClient({ nextPath }: { nextPath: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-      const data = (await res.json()) as { error?: string };
+      const data = (await res.json()) as { error?: string; hint?: string };
       if (!res.ok) {
-        setError(data.error ?? "Sign-in failed");
+        const parts = [data.error, data.hint].filter(Boolean);
+        setError(parts.length > 0 ? parts.join(" ") : "Sign-in failed");
         return;
       }
       router.push(nextPath);

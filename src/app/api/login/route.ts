@@ -13,6 +13,10 @@ const DOMAIN_SUFFIX = "@capnapp.com";
 const EXPECTED_PASSWORD =
   process.env.CAPN_DASHBOARD_PASSWORD?.trim() ?? "@Capnapp1";
 
+function sessionSigningConfigured(): boolean {
+  return Boolean(process.env.CAPN_SESSION_SECRET?.trim());
+}
+
 function validEmail(raw: string): boolean {
   const t = raw.trim().toLowerCase();
   if (!t.endsWith(DOMAIN_SUFFIX)) {
@@ -32,6 +36,16 @@ function passwordOk(given: string): boolean {
 }
 
 export async function POST(request: Request) {
+  if (process.env.NODE_ENV === "production" && !sessionSigningConfigured()) {
+    return NextResponse.json(
+      {
+        error: "Sign-in is not configured on the server.",
+        hint: "Add CAPN_SESSION_SECRET to your Vercel project environment variables (any long random string), then redeploy.",
+      },
+      { status: 503 },
+    );
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -52,7 +66,17 @@ export async function POST(request: Request) {
     );
   }
 
-  const token = await createSessionToken(email.trim().toLowerCase());
+  let token: string;
+  try {
+    token = await createSessionToken(email.trim().toLowerCase());
+  } catch (e) {
+    console.error("[login] createSessionToken", e);
+    return NextResponse.json(
+      { error: "Could not create session. Check server logs." },
+      { status: 500 },
+    );
+  }
+
   const res = NextResponse.json({ ok: true });
   res.cookies.set(COOKIE_NAME, token, {
     httpOnly: true,
