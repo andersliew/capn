@@ -1,5 +1,5 @@
 """
-CAPN Security - Live Email Pipeline (Final Version)
+CAPN Security - Live Email Pipeline
 - Uses IMAP with Gmail App Password (no OAuth needed)
 - Stores real Gmail UIDs to prevent duplicates
 - Inserts into patrol_reports_raw only (clean/dashboard are views)
@@ -25,7 +25,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ── Config ────────────────────────────────────────────────────────────────────
+# Config 
 DB_PARAMS = {
     "host":     os.environ.get("DB_HOST",     "ep-green-unit-aajscb9v-pooler.westus3.azure.neon.tech"),
     "port":     int(os.environ.get("DB_PORT", 5432)),
@@ -45,7 +45,7 @@ BATCH_SIZE    = 200   # emails per IMAP fetch batch (lower = more stable)
 MAX_WORKERS   = 4     # parallel parse threads
 CHUNK_SIZE    = 10000 # emails per historical backfill chunk
 
-# ── Location normalization ────────────────────────────────────────────────────
+# Location normalization 
 LOCATION_MAP = {
     "bailey":          "Bailey Farm Apartments",
     "mazda tire":      "Mazda Lot",
@@ -74,7 +74,7 @@ LOCATION_MAP = {
     "jeremy":          "Jeremy's House",
 }
 
-# ── Report type normalization ─────────────────────────────────────────────────
+# Report type normalization 
 REPORT_TYPE_PATTERNS = [
     (r"clock.?out|check.?out",                      "Check-Out Report"),
     (r"clock.?in|check.?in",                        "Check-In Report"),
@@ -93,7 +93,7 @@ REPORT_TYPE_PATTERNS = [
     (r"\d*(st|nd|rd|th)?\s*patrol|patrol",          "Patrol Report"),
 ]
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# Helpers
 def normalize_location(raw: str) -> str:
     if not raw:
         return ""
@@ -170,7 +170,7 @@ def extract_field(text: str, *patterns: str) -> str:
             return val
     return ""
 
-# ── Parser ────────────────────────────────────────────────────────────────────
+# Parser
 def parse_email(raw_email: Dict) -> Optional[Dict]:
     try:
         body    = raw_email["body"]
@@ -232,7 +232,7 @@ def parse_email(raw_email: Dict) -> Optional[Dict]:
         logger.error(f"Parse error: {e}")
         return None
 
-# ── DB helpers ────────────────────────────────────────────────────────────────
+# DB helpers
 def get_db_conn():
     return psycopg2.connect(**DB_PARAMS)
 
@@ -261,7 +261,7 @@ def bulk_insert(conn, rows: List[Dict]) -> int:
     conn.commit()
     return len(rows)
 
-# ── IMAP fetcher ──────────────────────────────────────────────────────────────
+# IMAP fetcher
 class IMAPFetcher:
     def __init__(self, user, password):
         self.user     = user
@@ -343,7 +343,7 @@ class IMAPFetcher:
             logger.info(f"  Fetched {min(i+BATCH_SIZE, len(email_ids))}/{len(email_ids)} emails")
         return results
 
-# ── Main processor ────────────────────────────────────────────────────────────
+# Main processor 
 class CAPNEmailProcessor:
     def __init__(self):
         self.fetcher   = IMAPFetcher(GMAIL_CREDS["user"], GMAIL_CREDS["password"])
@@ -455,7 +455,7 @@ class CAPNEmailProcessor:
                 logger.info(f"Inserted {inserted} new records")
 
             except KeyboardInterrupt:
-                logger.info("Shutting down...")
+                logger.info("Shutting down.")
                 self.fetcher.disconnect()
                 break
             except Exception as e:
