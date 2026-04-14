@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { databaseUrlMissingHint } from "@/lib/env-hints";
 import { fetchFilterOptions } from "@/lib/queries";
 
 export async function GET() {
@@ -7,7 +8,7 @@ export async function GET() {
     return NextResponse.json(
       {
         error: "DATABASE_URL is not set",
-        hint: "Add DATABASE_URL to .env.local with your Neon pooled connection string.",
+        hint: databaseUrlMissingHint(),
       },
       { status: 503 },
     );

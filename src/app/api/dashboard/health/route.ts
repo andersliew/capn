@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { databaseUrlMissingHint } from "@/lib/env-hints";
 import { getSql } from "@/lib/db";
 
 /**
@@ -12,7 +13,7 @@ export async function GET() {
   }
   if (!process.env.DATABASE_URL?.trim()) {
     return NextResponse.json(
-      { error: "DATABASE_URL is not set" },
+      { error: "DATABASE_URL is not set", hint: databaseUrlMissingHint() },
       { status: 503 },
     );
   }

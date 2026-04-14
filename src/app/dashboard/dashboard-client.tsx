@@ -199,10 +199,14 @@ export function DashboardClient({ initialLocation }: DashboardClientProps) {
       const json = (await res.json()) as DashboardPayload & {
         error?: string;
         message?: string;
+        hint?: string;
       };
       if (!res.ok) {
         setData(null);
-        setError(json.message ?? json.error ?? `Request failed (${res.status})`);
+        const base = json.message ?? json.error ?? `Request failed (${res.status})`;
+        setError(
+          json.hint ? `${base} ${json.hint}` : base,
+        );
         return;
       }
       setData(json);

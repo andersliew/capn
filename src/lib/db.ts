@@ -2,14 +2,14 @@ import "server-only";
 
 import { neon } from "@neondatabase/serverless";
 
+import { databaseUrlMissingHint } from "@/lib/env-hints";
+
 export type SqlClient = ReturnType<typeof neon>;
 
 function requireDatabaseUrl(): string {
   const url = process.env.DATABASE_URL?.trim();
   if (!url) {
-    throw new Error(
-      "DATABASE_URL is not set. Add your Neon pooled connection string to .env.local (see .env.example).",
-    );
+    throw new Error(`DATABASE_URL is not set. ${databaseUrlMissingHint()}`);
   }
   return url;
 }

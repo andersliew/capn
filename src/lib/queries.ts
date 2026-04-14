@@ -34,6 +34,24 @@ function patrolLocationExpr(sql: Sql) {
 }
 
 /**
+ * Legacy rows sometimes store the whole email tail in `security_officer` (through "Type:", "Location:", etc.).
+ * Same CAPN label strip as location, plus leading `Security Officer:` when the parser dumped the full line.
+ */
+function patrolOfficerExpr(sql: Sql) {
+  return sql`NULLIF(TRIM(BOTH FROM regexp_replace(
+    TRIM(BOTH FROM regexp_replace(
+      TRIM(BOTH FROM regexp_replace(COALESCE(r.security_officer::text, ''), '<[^>]*>'::text, ''::text, 'g'::text)),
+      '^[[:space:]]*Security[[:space:]]+Officer[[:space:]]*:[[:space:]]*'::text,
+      ''::text,
+      'i'::text
+    )),
+    '[[:space:]]+(Time[[:space:]]+Submitted|Report[[:space:]]+details|Type|Location|Security[[:space:]]+Officer)[[:space:]]*:.*'::text,
+    ''::text,
+    'i'::text
+  )), '')`;
+}
+
+/**
  * Reads `patrol_reports_raw` and parses both ISO and legacy datetime shapes.
  * `patrol_date` is the calendar day for filtering: prefer `date` when parseable,
  * else the date part of `patrol_datetime` (many sync rows have `datetime` but not `date`).
@@ -67,7 +85,7 @@ function patrolReportsBase(sql: Sql) {
           WHEN btrim(r.datetime::text) ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}' THEN to_timestamp(r.datetime, 'MM/DD/YYYY HH24:MI')::timestamptz
           ELSE NULL
         END AS patrol_datetime,
-        TRIM(BOTH FROM regexp_replace(r.security_officer, '<[^>]*>'::text, ''::text, 'g'::text)) AS security_officer,
+        ${patrolOfficerExpr(sql)} AS security_officer,
         CASE
           WHEN r.location IS NULL OR btrim(r.location::text) = '' THEN NULL
           ELSE ${patrolLocationExpr(sql)}
