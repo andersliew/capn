@@ -30,9 +30,8 @@ from googleapiclient.discovery import build
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
-# Rolling retention: delete patrol rows whose parsed `datetime` is older than this.
+# Rolling retention: keep only the last 6 months of patrol reports.
 # Align `GMAIL_QUERY` (e.g. newer_than:30d) with the same window.
-_RETENTION_DAYS = 30
 
 # When narrowing with `after:`, subtract this many calendar days from the last seen
 # internalDate so same-day and timezone edge messages are not skipped.
@@ -339,6 +338,27 @@ def main():
             f"(query tail: … after:{list_query.rsplit(':', 1)[-1]})"
         )
 
+    cursor.execute(
+        """
+        DELETE FROM patrol_reports_raw r
+        WHERE (
+            CASE
+                WHEN r.datetime IS NULL OR btrim(r.datetime::text) = '' THEN NULL
+                WHEN btrim(r.datetime::text) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
+                    THEN r.datetime::timestamptz
+                WHEN btrim(r.datetime::text) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]'
+                    THEN r.datetime::timestamptz
+                WHEN btrim(r.datetime::text) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+                    THEN (btrim(r.datetime::text)::date)::timestamptz
+                WHEN btrim(r.datetime::text) ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}'
+                    THEN to_timestamp(r.datetime, 'MM/DD/YYYY HH24:MI')::timestamptz
+                ELSE NULL
+            END
+        ) < NOW() - INTERVAL '6 months'
+        """
+    )
+    print(f"Deleted {cursor.rowcount} row(s) older than 6 months")
+
     all_messages = []
     next_page_token = None
 
@@ -412,12 +432,7 @@ def main():
                     gmail_message_id
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (gmail_message_id) DO UPDATE SET
-                    has_images = EXCLUDED.has_images,
-                    num_attachments = EXCLUDED.num_attachments,
-                    location = EXCLUDED.location,
-                    security_officer = EXCLUDED.security_officer,
-                    report_details = EXCLUDED.report_details
+                ON CONFLICT (gmail_message_id) DO NOTHING
             """, (
                 gmail_message_id,
                 report_type,
@@ -444,25 +459,6 @@ def main():
     bump_last_internal_ms(cursor, max_internal_seen)
     if max_internal_seen > 0:
         print(f"Updated gmail_sync_state.last_internal_ms to >= {max_internal_seen}")
-
-    # Drop rows outside the rolling window (same datetime parsing as the dashboard SQL).
-    cursor.execute(
-        """
-        DELETE FROM patrol_reports_raw r
-        WHERE (
-            CASE
-                WHEN r.datetime IS NULL OR btrim(r.datetime::text) = '' THEN NULL
-                WHEN btrim(r.datetime::text) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
-                    THEN r.datetime::timestamptz
-                WHEN btrim(r.datetime::text) ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}'
-                    THEN to_timestamp(r.datetime, 'MM/DD/YYYY HH24:MI')::timestamptz
-                ELSE NULL
-            END
-        ) < NOW() - (%s * INTERVAL '1 day')
-        """,
-        (_RETENTION_DAYS,),
-    )
-    print(f"Deleted {cursor.rowcount} row(s) older than {_RETENTION_DAYS} days")
 
     # Marks last successful sync run (even when no new messages), so the dashboard
     # can show when GitHub Actions / cron last finished — not only when the watermark moved.

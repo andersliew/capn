@@ -6,8 +6,8 @@ name: Gmail to Neon Sync
 on:
   workflow_dispatch:
   schedule:
-    # Daily: sync Gmail (GMAIL_QUERY e.g. newer_than:30d) and prune DB rows older than 30 days
-    - cron: "0 8 * * *"
+    # Daily: sync Gmail (GMAIL_QUERY e.g. newer_than:30d) and prune DB rows older than 6 months
+    - cron: "5 8 * * *"
 
 jobs:
   sync:
