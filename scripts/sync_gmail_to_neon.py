@@ -266,8 +266,17 @@ def bump_last_internal_ms(cursor, max_internal_ms):
     )
 
 
-def build_messages_list_query(gmail_query, last_internal_ms, force_full):
-    """Combine user `GMAIL_QUERY` with an optional Gmail `after:` bound for incremental sync."""
+def build_messages_list_query(
+    gmail_query,
+    last_internal_ms,
+    force_full,
+    force_backfill,
+    backfill_days,
+):
+    """Build the Gmail message list query for backfill or incremental sync."""
+    if force_backfill:
+        return f'subject:"CAPN Security" newer_than:{backfill_days}d'
+
     base = (gmail_query or "").strip()
     if not base:
         return base
@@ -317,9 +326,15 @@ def main():
             "DATABASE_URL is missing. Set it in the environment or in a .env file."
         )
 
-    if not gmail_query:
+    force_backfill = os.getenv("FORCE_BACKFILL", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+    if not gmail_query and not force_backfill:
         raise ValueError(
-            "GMAIL_QUERY is missing. Set it in the environment or in a .env file."
+            "GMAIL_QUERY is missing. Set it in the environment or in a .env file, unless FORCE_BACKFILL=true."
         )
 
     service = get_gmail_service()
@@ -329,8 +344,21 @@ def main():
 
     ensure_gmail_sync_state(cursor)
     last_internal_ms = get_last_internal_ms(cursor)
-    list_query = build_messages_list_query(gmail_query, last_internal_ms, force_full)
-    if force_full or last_internal_ms <= 0:
+    try:
+        backfill_days = int(os.getenv("BACKFILL_DAYS", "180") or "180")
+    except ValueError:
+        backfill_days = 180
+
+    list_query = build_messages_list_query(
+        gmail_query,
+        last_internal_ms,
+        force_full,
+        force_backfill,
+        backfill_days,
+    )
+    if force_backfill:
+        print(f"Gmail list: forced backfill newer_than:{backfill_days}d")
+    elif force_full or last_internal_ms <= 0:
         print("Gmail list: full window (no after: bound or --full).")
     else:
         print(
