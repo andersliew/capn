@@ -59,11 +59,11 @@ function toLocalDateString(d: Date) {
   return `${y}-${m}-${day}`;
 }
 
-/** Wide default so report dates parsed from email subjects (often not “this month”) still appear. */
+/** Default to last 6 months to match backend data retention. */
 function defaultRange() {
   const end = new Date();
   const start = new Date();
-  start.setDate(start.getDate() - 730);
+  start.setMonth(start.getMonth() - 6);
   return {
     startDate: toLocalDateString(start),
     endDate: toLocalDateString(end),
