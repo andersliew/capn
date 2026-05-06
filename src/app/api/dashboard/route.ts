@@ -9,24 +9,31 @@ function parseFilters(request: NextRequest): PatrolDashboardFilters {
   const startDate = sp.get("startDate")?.trim() || null;
   const endDate = sp.get("endDate")?.trim() || null;
   const location = sp.get("location")?.trim() || null;
+  const reportCategory = sp.get("reportCategory")?.trim() || null;
   const reportType = sp.get("reportType")?.trim() || null;
   const securityOfficer = sp.get("securityOfficer")?.trim() || null;
   const search = sp.get("search")?.trim() || null;
-  const hasImagesRaw = sp.get("hasImages");
-  let hasImages: boolean | null = null;
-  if (hasImagesRaw === "true") {
-    hasImages = true;
-  } else if (hasImagesRaw === "false") {
-    hasImages = false;
-  }
-
+  const activityModeRaw = sp.get("activityMode")?.trim();
+  const activityMode =
+    activityModeRaw === "all" ||
+    activityModeRaw === "incident" ||
+    activityModeRaw === "routine"
+      ? activityModeRaw
+      : "incident";
+  const trendIntervalRaw = sp.get("trendInterval")?.trim();
+  const trendInterval =
+    trendIntervalRaw === "daily" || trendIntervalRaw === "monthly"
+      ? trendIntervalRaw
+      : "weekly";
   return {
     startDate: startDate || null,
     endDate: endDate || null,
     location: location || null,
+    reportCategory: reportCategory || null,
     reportType: reportType || null,
     securityOfficer: securityOfficer || null,
-    hasImages,
+    activityMode,
+    trendInterval,
     search: search || null,
   };
 }

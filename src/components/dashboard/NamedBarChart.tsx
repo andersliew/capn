@@ -25,6 +25,7 @@ export function NamedBarChart({ title, subtitle, rows }: Props) {
                 </span>
                 <span className="shrink-0 tabular-nums text-zinc-500">
                   {r.count}
+                  {typeof r.share === "number" ? ` · ${r.share.toFixed(1)}%` : ""}
                 </span>
               </div>
               <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]">

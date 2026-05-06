@@ -125,6 +125,12 @@ def _collapse_ws(s):
     return re.sub(r"\s+", " ", (s or "").strip())
 
 
+def decode_mime_data(data):
+    if not data:
+        return ""
+    return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+
+
 # Emails often flatten the body into one line: "Location: … Time Submitted: … Report details: …"
 # Without stopping at the next label, `location` becomes an entire report and the dashboard
 # dropdown lists one "location" per message.
@@ -151,18 +157,13 @@ def extract_body_text(payload):
     plain_chunks = []
     html_fallback = None
 
-    def decode_b64(data):
-        if not data:
-            return ""
-        return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
-
     def walk(part):
         nonlocal html_fallback
         mime = (part.get("mimeType") or "").lower()
         body = part.get("body") or {}
         data = body.get("data")
         if data:
-            chunk = decode_b64(data)
+            chunk = decode_mime_data(data)
             if mime == "text/plain":
                 plain_chunks.append(chunk)
             elif mime == "text/html" and html_fallback is None:
@@ -288,25 +289,22 @@ def build_messages_list_query(
     return f"({base}) after:{after}"
 
 
-def get_attachment_info(payload):
-    """Count Gmail MIME parts that expose attachmentId (fetchable attachments).
-
-    Gmail often omits `filename` on inline images; requiring both filename and
-    attachmentId undercounted and produced 0 for typical patrol image emails.
-    """
-    count = 0
+def get_attachment_count(payload):
+    """Count Gmail MIME parts that expose attachmentId."""
+    total_count = 0
 
     def walk_parts(part):
-        nonlocal count
+        nonlocal total_count
         body = part.get("body", {})
+
         if body.get("attachmentId"):
-            count += 1
+            total_count += 1
 
         for child in part.get("parts", []) or []:
             walk_parts(child)
 
     walk_parts(payload)
-    return count
+    return total_count
 
 
 def main():
@@ -442,8 +440,9 @@ def main():
                 off2, loc2 = parse_snippet(snippet)
                 officer = officer or off2
                 location = location or loc2
-            num_attachments = get_attachment_info(payload)
-            has_images = "true" if num_attachments > 0 else "false"
+            num_attachments = get_attachment_count(payload)
+            has_images = "false"
+            report_details = body_text or snippet
 
             cursor.execute("""
                 INSERT INTO patrol_reports_raw (
@@ -460,7 +459,16 @@ def main():
                     gmail_message_id
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (gmail_message_id) DO NOTHING
+                ON CONFLICT (gmail_message_id) DO UPDATE
+                SET report_type = EXCLUDED.report_type,
+                    date = EXCLUDED.date,
+                    time = EXCLUDED.time,
+                    datetime = EXCLUDED.datetime,
+                    security_officer = COALESCE(EXCLUDED.security_officer, patrol_reports_raw.security_officer),
+                    location = COALESCE(EXCLUDED.location, patrol_reports_raw.location),
+                    report_details = EXCLUDED.report_details,
+                    has_images = EXCLUDED.has_images,
+                    num_attachments = EXCLUDED.num_attachments
             """, (
                 gmail_message_id,
                 report_type,
@@ -473,13 +481,13 @@ def main():
                 ),
                 officer,
                 location,
-                snippet,
+                report_details,
                 has_images,
                 str(num_attachments),
                 gmail_message_id
             ))
 
-            print(f"Inserted or skipped: {subject}")
+            print(f"Inserted or updated: {subject}")
 
         except Exception as e:
             print(f"Error processing message {gmail_message_id}: {e}")

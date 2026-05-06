@@ -29,12 +29,14 @@ Query parameters (all optional; combine as needed):
 | `startDate` | `YYYY-MM-DD` — filters `patrol_date >=` |
 | `endDate` | `YYYY-MM-DD` — filters `patrol_date <=` |
 | `location` | Exact match on `location` |
-| `reportType` | Exact match on `report_type` |
+| `reportCategory` | Normalized category such as `Trespassing`, `Maintenance`, `Patrol`, or `Check-In` |
+| `reportType` | Exact match on raw `report_type` |
 | `securityOfficer` | Exact match on `security_officer` |
-| `hasImages` | `true` or `false` |
+| `activityMode` | `all`, `incident`, or `routine` — defaults to `incident` |
+| `trendInterval` | `daily`, `weekly`, or `monthly` |
 | `search` | `ILIKE` on `report_details_clean` (recent table query) |
 
-Response JSON includes KPIs, chart series, filter option lists (distinct values), and recent rows. See `src/lib/types/dashboard.ts`.
+Response JSON includes KPIs, normalized category analytics, trend series, property/officer breakdowns, filter option lists, and recent rows. See `src/lib/types/dashboard.ts`.
 
 ## SQL
 

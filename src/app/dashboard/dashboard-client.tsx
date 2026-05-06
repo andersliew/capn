@@ -7,9 +7,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { DateField } from "@/components/dashboard/DateField";
 import { DayOfWeekChart } from "@/components/dashboard/DayOfWeekChart";
 import { HourChart } from "@/components/dashboard/HourChart";
+import { IncidentTrendChart } from "@/components/dashboard/IncidentTrendChart";
+import { KeyInsightsPanel } from "@/components/dashboard/KeyInsightsPanel";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { NamedBarChart } from "@/components/dashboard/NamedBarChart";
+import { OfficerBreakdownTable } from "@/components/dashboard/OfficerBreakdownTable";
+import { PropertyBreakdownTable } from "@/components/dashboard/PropertyBreakdownTable";
 import { RecentReportsTable } from "@/components/dashboard/RecentReportsTable";
+import { SelectedPropertyDeepDive } from "@/components/dashboard/SelectedPropertyDeepDive";
 import { TimeSeriesChart } from "@/components/dashboard/TimeSeriesChart";
 import { useTriggerGmailSyncOnMount } from "@/hooks/use-trigger-gmail-sync-on-mount";
 import type { DashboardPayload, PatrolDashboardFilters } from "@/lib/types/dashboard";
@@ -81,17 +86,18 @@ function buildQuery(f: PatrolDashboardFilters): string {
   if (f.location) {
     p.set("location", f.location);
   }
+  if (f.reportCategory) {
+    p.set("reportCategory", f.reportCategory);
+  }
   if (f.reportType) {
     p.set("reportType", f.reportType);
   }
   if (f.securityOfficer) {
     p.set("securityOfficer", f.securityOfficer);
   }
-  if (f.hasImages === true) {
-    p.set("hasImages", "true");
-  }
-  if (f.hasImages === false) {
-    p.set("hasImages", "false");
+  p.set("activityMode", f.activityMode);
+  if (f.trendInterval !== "weekly") {
+    p.set("trendInterval", f.trendInterval);
   }
   if (f.search) {
     p.set("search", f.search);
@@ -116,9 +122,11 @@ export function DashboardClient({ initialLocation }: DashboardClientProps) {
     startDate: null,
     endDate: null,
     location: initialLocation,
+    reportCategory: null,
     reportType: null,
     securityOfficer: null,
-    hasImages: null,
+    activityMode: "incident",
+    trendInterval: "weekly",
     search: null,
   }));
 
@@ -244,7 +252,7 @@ export function DashboardClient({ initialLocation }: DashboardClientProps) {
 
         {/* Filter bar */}
         <div className="border-t border-white/[0.04] bg-[#0c0c0f]">
-          <div className="mx-auto grid max-w-[1600px] gap-3 px-4 py-4 lg:grid-cols-3 lg:gap-4 lg:px-8 xl:grid-cols-6">
+            <div className="mx-auto grid max-w-[1600px] gap-3 px-4 py-4 lg:grid-cols-3 lg:gap-4 lg:px-8 xl:grid-cols-7">
             <DateField
               label="From"
               value={filters.startDate}
@@ -287,7 +295,30 @@ export function DashboardClient({ initialLocation }: DashboardClientProps) {
             </label>
             <label className="flex flex-col gap-1.5">
               <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
-                Report type
+                Category
+              </span>
+              <select
+                value={filters.reportCategory ?? ""}
+                onChange={(e) =>
+                  setFilters((f) => ({
+                    ...f,
+                    reportCategory: e.target.value || null,
+                  }))
+                }
+                style={filterSelectStyle}
+                className={filterSelectClassName}
+              >
+                <option value="">All</option>
+                {data?.filterOptions.reportCategories.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                Raw report type
               </span>
               <select
                 value={filters.reportType ?? ""}
@@ -333,39 +364,32 @@ export function DashboardClient({ initialLocation }: DashboardClientProps) {
             </label>
             <label className="flex flex-col gap-1.5">
               <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
-                Has images
+                Trend
               </span>
               <select
-                value={
-                  filters.hasImages === true
-                    ? "yes"
-                    : filters.hasImages === false
-                      ? "no"
-                      : ""
-                }
-                onChange={(e) => {
-                  const v = e.target.value;
+                value={filters.trendInterval}
+                onChange={(e) =>
                   setFilters((f) => ({
                     ...f,
-                    hasImages:
-                      v === "yes" ? true : v === "no" ? false : null,
-                  }));
-                }}
+                    trendInterval: e.target.value as PatrolDashboardFilters["trendInterval"],
+                  }))
+                }
                 style={filterSelectStyle}
                 className={filterSelectClassName}
               >
-                <option value="">All</option>
-                <option value="yes">Yes</option>
-                <option value="no">No</option>
+                <option value="weekly">Weekly</option>
+                <option value="daily">Daily</option>
+                <option value="monthly">Monthly</option>
               </select>
             </label>
           </div>
           <div className="mx-auto max-w-[1600px] px-4 pb-4 lg:px-8">
-            <label className="flex flex-col gap-1.5">
-              <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
-                Search report details
-              </span>
-                           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+            <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                  Search report details
+                </span>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
                 <input
                   type="search"
                   value={searchInput}
@@ -385,6 +409,39 @@ export function DashboardClient({ initialLocation }: DashboardClientProps) {
                 >
                   Search
                 </button>
+                </div>
+              </label>
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                  Report class
+                </span>
+                <div className="inline-flex rounded-lg border border-white/[0.08] bg-[#141419] p-1">
+                  {[
+                    ["all", "All reports"],
+                    ["incident", "Incident reports"],
+                    ["routine", "Routine reports"],
+                  ].map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() =>
+                        setFilters((f) => ({
+                          ...f,
+                          activityMode: value as PatrolDashboardFilters["activityMode"],
+                        }))
+                      }
+                      className={
+                        filters.activityMode === value
+                          ? "rounded-md bg-sky-500/90 px-3 py-1.5 text-xs font-medium text-white"
+                          : "rounded-md px-3 py-1.5 text-xs font-medium text-zinc-400 transition hover:text-zinc-200"
+                      }
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="xl:col-span-2">
                 {data ? (
                   <p className="shrink-0 text-xs text-zinc-500 sm:ml-auto sm:text-right">
                     {data.lastGmailSyncAt ? (
@@ -409,7 +466,7 @@ export function DashboardClient({ initialLocation }: DashboardClientProps) {
                   </p>
                 ) : null}
               </div>
-            </label>
+            </div>
             <p className="mt-2 text-xs text-zinc-600">
               Report-details search runs when you click Search or press Enter.
               Other filters apply as you change them.
@@ -452,13 +509,24 @@ export function DashboardClient({ initialLocation }: DashboardClientProps) {
 
         {data ? (
           <>
+            <KeyInsightsPanel insights={data.keyInsights} />
+
             <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
               <MetricCard
-                label="Total patrol reports"
+                label="Total reports"
                 value={data.kpis.totalReports}
+                sub={`Incident rate ${data.kpis.incidentRate.toFixed(1)}%`}
               />
               <MetricCard
-                label="Locations"
+                label="Incident reports"
+                value={data.kpis.incidentReports}
+              />
+              <MetricCard
+                label="Routine reports"
+                value={data.kpis.routineReports}
+              />
+              <MetricCard
+                label="Properties"
                 value={data.kpis.distinctLocations}
                 sub="Distinct in scope"
               />
@@ -467,44 +535,80 @@ export function DashboardClient({ initialLocation }: DashboardClientProps) {
                 value={data.kpis.distinctOfficers}
                 sub="Distinct in scope"
               />
-              <MetricCard
-                label="Reports with images"
-                value={data.kpis.reportsWithImages}
-              />
-              <MetricCard
-                label="Total attachments"
-                value={data.kpis.totalAttachments}
-              />
             </section>
 
             <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
               <TimeSeriesChart points={data.reportsOverTime} />
+              <IncidentTrendChart
+                points={data.incidentTrend}
+                location={effectiveLocation}
+                category={filters.reportCategory}
+                interval={filters.trendInterval}
+              />
               <HourChart points={data.reportsByHour} />
-              <DayOfWeekChart rows={data.reportsByDayOfWeek} />
             </section>
 
             <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+              <DayOfWeekChart rows={data.reportsByDayOfWeek} />
               <NamedBarChart
-                title="Report type"
-                subtitle="Grouped by report_type"
+                title="Report category breakdown"
+                subtitle="Normalized categories, not raw type variants"
                 rows={data.reportTypeBreakdown}
               />
               <NamedBarChart
                 title="By location"
-                subtitle="Top locations in scope"
+                subtitle="Top properties in scope"
                 rows={data.reportsByLocation}
               />
-              <NamedBarChart
-                title={
-                  effectiveLocation ? "Who covers this site?" : "By officer"
-                }
-                subtitle={
-                  effectiveLocation
-                    ? `Patrols at this location with your other filters`
-                    : `Patrol count by officer (other filters apply; officer filter ignored here)`
-                }
-                rows={data.reportsByOfficer}
-              />
+            </section>
+
+            <section className="space-y-4">
+              <SelectedPropertyDeepDive data={data.selectedPropertyDeepDive} />
+              <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+                <NamedBarChart
+                  title="Top incident properties"
+                  subtitle="Highest incident counts"
+                  rows={data.propertyLeaders.incidents}
+                />
+                <NamedBarChart
+                  title="Trespassing by property"
+                  subtitle="Top trespassing counts"
+                  rows={data.propertyLeaders.trespassing}
+                />
+                <NamedBarChart
+                  title="Maintenance by property"
+                  subtitle="Top maintenance counts"
+                  rows={data.propertyLeaders.maintenance}
+                />
+                <NamedBarChart
+                  title="Risk-related incidents"
+                  subtitle="Combined higher-signal risk"
+                  rows={data.propertyLeaders.risk}
+                />
+              </div>
+              <PropertyBreakdownTable rows={data.propertyBreakdown} />
+            </section>
+
+            <section className="space-y-4">
+              <div className="grid gap-4 lg:grid-cols-2">
+                <NamedBarChart
+                  title={
+                    effectiveLocation ? "Who covers this site?" : "By officer"
+                  }
+                  subtitle={
+                    effectiveLocation
+                      ? `Reports at this location with your other filters`
+                      : `Report count by officer (officer filter ignored here)`
+                  }
+                  rows={data.reportsByOfficer}
+                />
+                <NamedBarChart
+                  title="Top incident officers"
+                  subtitle="Incident submissions by cleaned officer name"
+                  rows={data.topIncidentOfficers}
+                />
+              </div>
+              <OfficerBreakdownTable rows={data.officerBreakdown} />
             </section>
 
             <RecentReportsTable rows={data.recentReports} />
@@ -543,4 +647,3 @@ export function DashboardFallback() {
     </div>
   );
 }
-
